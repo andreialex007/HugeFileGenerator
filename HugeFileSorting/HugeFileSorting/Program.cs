@@ -12,26 +12,32 @@ namespace HugeFileSorting
     internal static class Program
     {
         const int maxSize = 64;
-        private const int hugeFileSizeMb = 2 * 1024;
-        
+        private static readonly int hugeFileSizeMb = 10 * 1024;
+
         private static void Main(string[] args)
         {
-            //1024 KB
-            //1024 MB
-            //1024 GB
+            Directory.CreateDirectory("Data");
 
+            //  GenerateHugeFile();
+            SortHugeFile();
+        }
 
-           // Monitoring();
-           // Task.Run(() => Monitoring());
-          //  GenerateHugeFile("HugeFile",hugeFileSizeMb);
-            var filePaths = Directory.GetFiles("Data", "*.generated-part.txt");
-            MergingFiles(Path.Combine("Data","HugeFile.result.txt"), filePaths);
-
-            // Parallel.For(0L, 10, i => GenerateHugeFile($"HugeFile-{i}.txt"));
+        public static void GenerateHugeFile()
+        {
+            Task.Run(Monitoring);
+            GenerateHugeFile("HugeFile", hugeFileSizeMb);
+            MergeHugeFileParts();
+            Thread.Sleep(100);
+            
         }
         
+        private static void MergeHugeFileParts()
+        {
+            var filePaths = Directory.GetFiles("Data", "*.part.txt");
+            MergingFiles(Path.Combine("Data","HugeFile.result.txt"), filePaths);
+        }
         
-        static void MergingFiles(string outputFile, params string[] inputTxtDocs)
+        private static void MergingFiles(string outputFile, params string[] inputTxtDocs)
         {
             using (Stream outputStream = File.OpenWrite(outputFile))
             {
@@ -43,6 +49,8 @@ namespace HugeFileSorting
                     }
                 }
             }
+            
+            inputTxtDocs.ToList().ForEach(File.Delete);
         }
 
         private static void Monitoring()
@@ -57,37 +65,39 @@ namespace HugeFileSorting
                 var sizeMb = ((float) sum) / (1024 * 1024);
                 
                 TimeSpan timeRemaining = TimeSpan.FromTicks((long) (DateTime.Now.Subtract(startTime).Ticks * (hugeFileSizeMb - (sizeMb)) / (sizeMb)));
-                
+                if(sizeMb > hugeFileSizeMb)
+                    return;
                 Console.WriteLine($"Elapsed={stopwatch.Elapsed:mm':'ss};Remaining={timeRemaining:mm':'ss};SizeMB="+sizeMb);
             }
         }
-
-        public static void MainSplittingJob()
+        
+        public static void SortHugeFile()
         {
-            SplitHugeFileIntoChunks();
+            SplitFile(Path.Combine("Data","HugeFile.result.txt"),1024 * 1024 * 1024, "Data");
 
             foreach (var filePath in Directory.GetFiles("Data", "*.part.txt"))
             {
-                int[] array = File.ReadLines(filePath).Select(int.Parse).ToArray();
+                int[] array = File.ReadLines(filePath).Where(x=>x.Length > 0).Select(int.Parse).ToArray();
                 Array.Sort(array);
                 File.WriteAllLines(filePath.Replace(".part.txt",".sorted.part.txt"), array.Select(x=>x.ToString()));
             }
            
             var readers = GetReaders();
-
-            var currentNumbers = readers.Select(x => int.Parse(x.ReadLine())).ToList();
-            var streamWriter = new StreamWriter(Path.Combine("Data", "HugeFileSorted.txt"));
+            var currentNumbers = readers.Select(x => int.Parse(x.ReadLine())).ToArray();
+            var path = Path.Combine("Data", "HugeFile.sorted.txt");
+            var streamWriter = new StreamWriter(path, append:false, Encoding.ASCII, 655369);
             while (true)
             {
                 var minNumber = currentNumbers.Min();
                 streamWriter.WriteLine(minNumber);
                 
-                var index = currentNumbers.IndexOf(minNumber);
+                var index = Array.IndexOf(currentNumbers, minNumber);
                 var currentReader = readers[index];
                 if (currentReader.EndOfStream)
                 {
+                    readers[index].Dispose();
                     readers.RemoveAt(index);
-                    currentNumbers.RemoveAt(index);
+                    currentNumbers = currentNumbers.Where((val, idx) => idx != index).ToArray();
                     if (readers.Count == 0)
                     {
                         break;
@@ -99,6 +109,8 @@ namespace HugeFileSorting
                 }
             }
             streamWriter.Dispose();
+
+            Directory.GetFiles("Data", "*.sorted.part.txt").ToList().ForEach(File.Delete);
         }
         
 
@@ -106,14 +118,41 @@ namespace HugeFileSorting
         {
             return Directory
                 .GetFiles("Data", "*.sorted.part.txt")
-                .Select(x => new StreamReader(x))
+                .Select(x => new StreamReader(x,new FileStreamOptions{  BufferSize = 655369 }))
                 .ToList();
         }
+        
+        public static void SplitFile(string inputFile, int chunkSize, string path)
+        {
+            const int BUFFER_SIZE = 20 * 1024;
+            byte[] buffer = new byte[BUFFER_SIZE];
+
+            using (Stream input = File.OpenRead(inputFile))
+            {
+                int index = 0;
+                while (input.Position < input.Length)
+                {
+                    using (Stream output = File.Create($"{path}\\FilePart-{index}.part.txt"))
+                    {
+                        int remaining = chunkSize, bytesRead;
+                        while (remaining > 0 && (bytesRead = input.Read(buffer, 0,
+                            Math.Min(remaining, BUFFER_SIZE))) > 0)
+                        {
+                            output.Write(buffer, 0, bytesRead);
+                            remaining -= bytesRead;
+                        }
+                    }
+                    index++;
+                    Thread.Sleep(500); // experimental; perhaps try it
+                }
+            }
+        }
+        
 
         public static void SplitHugeFileIntoChunks()
         {
-            var _100Kb = 100 * 1024;
-            var hugeFilePath = Path.Combine("Data", "HugeFile.txt");
+            var chunckSizeMb = 100 * 1024 * 1024;
+            var hugeFilePath = Path.Combine("Data", "HugeFile.result.txt");
 
             var writerIndex = 0;
             StreamWriter currentWriter = null;
@@ -121,11 +160,11 @@ namespace HugeFileSorting
             {
                 while (!reader.EndOfStream)
                 {
-                    if (currentWriter == null || currentWriter.BaseStream.Length / _100Kb >= 1)
+                    if (currentWriter == null || currentWriter.BaseStream.Length / chunckSizeMb >= 1)
                     {
                         currentWriter?.Dispose();
                         writerIndex++;
-                        currentWriter = new StreamWriter(Path.Combine("Data", $"FilePart-{writerIndex}.part.txt"));
+                        currentWriter = new StreamWriter(Path.Combine("Data", $"FilePart-{writerIndex}.part.txt"), false, Encoding.ASCII);
                     }
                     currentWriter.WriteLine(reader.ReadLine());
                 }
@@ -135,11 +174,11 @@ namespace HugeFileSorting
 
         private static void GenerateHugeFile(string hugeFileName, int hugeFileSizeMb)
         {
-           const int hugeFilePartSizeLimitMb = 200;
+           const int hugeFilePartSizeLimitMb = 50;
            var numberOfParts = (int) Math.Round(hugeFileSizeMb / (float) hugeFilePartSizeLimitMb);
            Enumerable.Range(0,numberOfParts)
                 .AsParallel()
-                .ForAll(i=>GenerateHugeFilePart($"{hugeFileName}-{i}.generated-part.txt", hugeFilePartSizeLimitMb));
+                .ForAll(i=>GenerateHugeFilePart($"{hugeFileName}-{i}.part.txt", hugeFilePartSizeLimitMb));
         }
         
 
@@ -165,22 +204,6 @@ namespace HugeFileSorting
             }
             
         }
-        
-        
-        /*
-         var hugeFileText = File.ReadAllText(hugeFilePath);
-            var items = hugeFileText.Split(Environment.NewLine).ToList();
-            var list = items.Chunk(3).ToList();
-            var sortedChunks = list.Select(x => string.Join(
-                    Environment.NewLine,
-                    x.Select(int.Parse).OrderBy(t => t).ToList()
-                )
-            ).ToList();
-         * 
-         */
-        
-
-        
     }
 
     public static class Extensions
