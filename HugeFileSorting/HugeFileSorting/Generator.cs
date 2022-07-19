@@ -10,7 +10,8 @@ namespace HugeFileSorting
 {
     public static class Generator
     {
-        private static readonly int hugeFileSizeMb = 1 * 1024;
+        private static int mbSize = 1024 * 1024;
+        private static readonly int totalSizeInMb = 1 * 1024;
         private static string[] nouns;
 
         public static void Generate()
@@ -18,7 +19,7 @@ namespace HugeFileSorting
             Directory.CreateDirectory("Data");
             nouns = File.ReadAllLines(Path.Combine("nouns.txt")).ToArray();
             Task.Run(Monitoring);
-            GenerateHugeFile("HugeFile", hugeFileSizeMb);
+            GenerateHugeFile("HugeFile", totalSizeInMb);
             MergeHugeFileParts();
             Thread.Sleep(100);
         }
@@ -36,7 +37,6 @@ namespace HugeFileSorting
         {
             var numberRandom = new Random();
             var nounRandom = new Random();
-            var mbSize = 1024 * 1024; 
             var hugeFilePath = Path.Combine("Data", hugeFileName);
             var randomMaxNumber = 999_999;
             
@@ -79,19 +79,19 @@ namespace HugeFileSorting
         
         private static void Monitoring()
         {
-            DateTime startTime = DateTime.Now;
-            Stopwatch stopwatch = Stopwatch.StartNew();
+            var startTime = DateTime.Now;
+            var stopwatch = Stopwatch.StartNew();
             while (true)
             {
                 Thread.Sleep(500);
-                DirectoryInfo dirInfo = new DirectoryInfo("Data");
+                var dirInfo = new DirectoryInfo("Data");
                 var sum = dirInfo.EnumerateFiles("*", SearchOption.AllDirectories).Sum(file => new System.IO.FileInfo(file.FullName).Length);
-                var sizeMb = ((float) sum) / (1024 * 1024);
+                var currentMbSize = ((float) sum) / (mbSize);
                 
-                TimeSpan timeRemaining = TimeSpan.FromTicks((long) (DateTime.Now.Subtract(startTime).Ticks * (hugeFileSizeMb - (sizeMb)) / (sizeMb)));
-                if(sizeMb > hugeFileSizeMb)
+                TimeSpan timeRemaining = TimeSpan.FromTicks((long) (DateTime.Now.Subtract(startTime).Ticks * (totalSizeInMb - (currentMbSize)) / (currentMbSize)));
+                if(currentMbSize > totalSizeInMb)
                     return;
-                Console.WriteLine($"Elapsed={stopwatch.Elapsed:mm':'ss};Remaining={timeRemaining:mm':'ss};SizeMB="+sizeMb);
+                Console.WriteLine($"Elapsed={stopwatch.Elapsed:mm':'ss};Remaining={timeRemaining:mm':'ss};SizeMB="+currentMbSize);
             }
         }
     }
