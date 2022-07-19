@@ -12,23 +12,26 @@ namespace HugeFileSorting
     internal static class Program
     {
         const int maxSize = 64;
-        private static readonly int hugeFileSizeMb = 10 * 1024;
+        private static readonly int hugeFileSizeMb = 1 * 1024;
+        private static string[] nouns;
 
         private static void Main(string[] args)
         {
             Directory.CreateDirectory("Data");
 
-            //  GenerateHugeFile();
-            SortHugeFile();
+              GenerateHugeFile();
+           // SortHugeFile();
         }
 
         public static void GenerateHugeFile()
         {
+            nouns = File.ReadAllLines(Path.Combine("nouns.txt")).ToArray();
+
             Task.Run(Monitoring);
             GenerateHugeFile("HugeFile", hugeFileSizeMb);
             MergeHugeFileParts();
             Thread.Sleep(100);
-            
+            string[] strings = new List<string>().ToArray();
         }
         
         private static void MergeHugeFileParts()
@@ -188,12 +191,13 @@ namespace HugeFileSorting
             
             var hugeFilePath = Path.Combine("Data", hugeFileName);
             var random = new Random();
-            var randomMaxNumber = 999_999_999;
+            var randomMaxNumber = 999_999;
+            Random nounRandom = new Random();
             using (var file = new FileStream(hugeFilePath, FileMode.Create))
             {
                 while (true)
                 {
-                    var next = random.Next(randomMaxNumber) + Environment.NewLine;
+                    var next = $"{random.Next(randomMaxNumber)}. {nouns[nounRandom.Next(0, nouns.Length)]}{Environment.NewLine}";
                     file.Write(Encoding.ASCII.GetBytes(next.ToString()));
                     var totalLength = file.Length;
                     if ((totalLength / mbSize) >= chunkSizeMb)
